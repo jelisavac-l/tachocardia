@@ -11,3 +11,8 @@ pom.xml.asc
 /.prepl-port
 .hgignore
 .hg/
+.calva/
+.clj-kondo/
+.lsp/
+example.DDD
+ECE-TRANS-SC1-2006-02a1e.pdf
