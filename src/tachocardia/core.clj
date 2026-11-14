@@ -112,23 +112,41 @@
      :birth-date birth
      :preferred-language lang}))
 
-;; TODO hardcoded for now
+(defn parse-licence [data]
+  (let [auth (read-name data 0)
+        nation (ubyte (aget data 36))
+        number (String. data 37 16 (Charset/forName "US-ASCII"))]
+    {:driving-licence-issuing-authority (:text auth)
+     :driving-licence-issuing-nation nation
+     :driving-licence-number number}))
+
+;; TODO hardcoded tags from the EU spec
 (def identification-tag 0x052000)
+(def licence-tag        0x052100)
+
+(defn find-tlv [tlvs tag]
+  (:value (first (filter (fn [t] (= (:tag t) tag)) tlvs))))
 
 (defn read-driver-identification [path]
   ;; TODO: maybe we don't need to read full file at once or at least not by one thread
   (let [tlvs (parse-tlv (read-bytes path))
-        id-tlv (first (filter (fn [t] (= (:tag t) identification-tag)) tlvs))]
-    (when id-tlv
-      (parse-identification (:value id-tlv)))))
+        id-val (find-tlv tlvs identification-tag)]
+    (when id-val
+      (parse-identification id-val))))
+
+(defn read-card [path]
+  (let [tlvs (parse-tlv (read-bytes path))
+        id-val (find-tlv tlvs identification-tag)
+        lic-val (find-tlv tlvs licence-tag)]
+    {:identification (when id-val (parse-identification id-val))
+     :driving-licence (when lic-val (parse-licence lic-val))}))
 
 (defn -main [& args]
   ;; please use your own .DDD file you downloaded from your own tacho card
   (let [path (if (first args) (first args) "example.DDD")
-        info (read-driver-identification path)]
-    (if info
-      (doseq [[k v] info]
-        (println (str (name k) ": " v)))
+        card (read-card path)]
+    (if (:identification card)
+      (println card)
       (do
         (println "could not find identification")
         (System/exit 1)))))
