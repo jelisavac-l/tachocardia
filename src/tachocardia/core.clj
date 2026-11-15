@@ -90,7 +90,7 @@
 
 (defn parse-identification [data]
   (let [nation (ubyte (aget data 0))
-        card-number (String. data 1 16 (Charset/forName "US-ASCII"))
+        card-number (str/trim (String. data 1 16 (Charset/forName "US-ASCII")))
         auth (read-name data 17)
         i (:next auth)
         issue (unix->date data i)
@@ -115,7 +115,7 @@
 (defn parse-licence [data]
   (let [auth (read-name data 0)
         nation (ubyte (aget data 36))
-        number (String. data 37 16 (Charset/forName "US-ASCII"))]
+        number (str/trim (String. data 37 16 (Charset/forName "US-ASCII")))]
     {:driving-licence-issuing-authority (:text auth)
      :driving-licence-issuing-nation nation
      :driving-licence-number number}))
