@@ -78,6 +78,23 @@
       nil
       (str (.toLocalDate (.atOffset (Instant/ofEpochSecond t) ZoneOffset/UTC))))))
 
+(defn unix->datetime [data i]
+  (let [t (u32-be data i)]
+    (if (= t 0)
+      nil
+      (str (Instant/ofEpochSecond t)))))
+
+(defn read-reg-number
+  ;; vehicle registration = 1 byte nation + 1 byte code page + 13 bytes text
+  [data i]
+  (let [nation (ubyte (aget data i))
+        code-page (ubyte (aget data (+ i 1)))
+        raw (byte-array 13)]
+    (dotimes [k 13]
+      (aset raw k (aget data (+ i 2 k))))
+    {:nation nation
+     :registration (iso8859 code-page raw)}))
+
 (defn birth->date [data i]
   ;; birth date is stored as BCD / hex digits YYYYMMDD
   (let [hex (str (format "%02X" (ubyte (aget data i)))
@@ -120,9 +137,31 @@
      :driving-licence-issuing-nation nation
      :driving-licence-number number}))
 
+;; event and fault records have the exact same 24-byte layout
+(defn parse-event-records [data]
+  (let [n (alength data)
+        result (atom [])]
+    (loop [i 0]
+      (if (> (+ i 24) n)
+        @result
+        (let [etype (ubyte (aget data i))
+              begin (unix->datetime data (+ i 1))
+              end (unix->datetime data (+ i 5))
+              veh (read-reg-number data (+ i 9))]
+          ;; skip empty slots in the circular buffer
+          (when begin
+            (swap! result conj {:type etype
+                                :begin-time begin
+                                :end-time end
+                                :vehicle-nation (:nation veh)
+                                :vehicle-registration (:registration veh)}))
+          (recur (+ i 24)))))))
+
 ;; TODO hardcoded tags from the EU spec
 (def identification-tag 0x052000)
 (def licence-tag        0x052100)
+(def events-tag         0x050200)
+(def faults-tag         0x050300)
 
 (defn find-tlv [tlvs tag]
   (:value (first (filter (fn [t] (= (:tag t) tag)) tlvs))))
@@ -137,9 +176,13 @@
 (defn read-card [path]
   (let [tlvs (parse-tlv (read-bytes path))
         id-val (find-tlv tlvs identification-tag)
-        lic-val (find-tlv tlvs licence-tag)]
+        lic-val (find-tlv tlvs licence-tag)
+        ev-val (find-tlv tlvs events-tag)
+        fl-val (find-tlv tlvs faults-tag)]
     {:identification (when id-val (parse-identification id-val))
-     :driving-licence (when lic-val (parse-licence lic-val))}))
+     :driving-licence (when lic-val (parse-licence lic-val))
+     :events (if ev-val (parse-event-records ev-val) [])
+     :faults (if fl-val (parse-event-records fl-val) [])}))
 
 (defn -main [& args]
   ;; please use your own .DDD file you downloaded from your own tacho card
