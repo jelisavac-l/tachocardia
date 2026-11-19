@@ -18,6 +18,13 @@
   (+ (* (ubyte (aget data i)) 256)
      (ubyte (aget data (+ i 1)))))
 
+(defn u24-be
+  "3 bytes big endian (used for odometer and tags)"
+  [data i]
+  (+ (* (ubyte (aget data i)) 65536)
+     (* (ubyte (aget data (+ i 1))) 256)
+     (ubyte (aget data (+ i 2)))))
+
 (defn u32-be
   "4 bytes big endian"
   [data i]
@@ -157,11 +164,32 @@
                                 :vehicle-registration (:registration veh)}))
           (recur (+ i 24)))))))
 
+(defn parse-vehicles [data]
+  ;; 2 bytes newest pointer, then 31-byte records
+  (let [n (alength data)
+        result (atom [])]
+    (loop [i 2]
+      (if (> (+ i 31) n)
+        @result
+        (let [odo-begin (u24-be data i)
+              odo-end (u24-be data (+ i 3))
+              first-use (unix->datetime data (+ i 6))
+              last-use (unix->datetime data (+ i 10))
+              veh (read-reg-number data (+ i 14))]
+          (swap! result conj {:first-use first-use
+                              :last-use last-use
+                              :odometer-begin-km odo-begin
+                              :odometer-end-km odo-end
+                              :vehicle-nation (:nation veh)
+                              :vehicle-registration (:registration veh)})
+          (recur (+ i 31)))))))
+
 ;; TODO hardcoded tags from the EU spec
 (def identification-tag 0x052000)
 (def licence-tag        0x052100)
 (def events-tag         0x050200)
 (def faults-tag         0x050300)
+(def vehicles-tag       0x050500)
 
 (defn find-tlv [tlvs tag]
   (:value (first (filter (fn [t] (= (:tag t) tag)) tlvs))))
@@ -178,11 +206,13 @@
         id-val (find-tlv tlvs identification-tag)
         lic-val (find-tlv tlvs licence-tag)
         ev-val (find-tlv tlvs events-tag)
-        fl-val (find-tlv tlvs faults-tag)]
+        fl-val (find-tlv tlvs faults-tag)
+        veh-val (find-tlv tlvs vehicles-tag)]
     {:identification (when id-val (parse-identification id-val))
      :driving-licence (when lic-val (parse-licence lic-val))
      :events (if ev-val (parse-event-records ev-val) [])
-     :faults (if fl-val (parse-event-records fl-val) [])}))
+     :faults (if fl-val (parse-event-records fl-val) [])
+     :vehicles-used (if veh-val (parse-vehicles veh-val) [])}))
 
 (defn -main [& args]
   ;; please use your own .DDD file you downloaded from your own tacho card
