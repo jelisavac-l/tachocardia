@@ -176,13 +176,34 @@
               first-use (unix->datetime data (+ i 6))
               last-use (unix->datetime data (+ i 10))
               veh (read-reg-number data (+ i 14))]
-          (swap! result conj {:first-use first-use
-                              :last-use last-use
-                              :odometer-begin-km odo-begin
-                              :odometer-end-km odo-end
-                              :vehicle-nation (:nation veh)
-                              :vehicle-registration (:registration veh)})
+          (when first-use
+            (swap! result conj {:first-use first-use
+                                :last-use last-use
+                                :odometer-begin-km odo-begin
+                                :odometer-end-km odo-end
+                                :vehicle-nation (:nation veh)
+                                :vehicle-registration (:registration veh)}))
           (recur (+ i 31)))))))
+
+(defn parse-places [data]
+  ;; 1 byte newest pointer, then 10-byte records
+  (let [n (alength data)
+        result (atom [])]
+    (loop [i 1]
+      (if (> (+ i 10) n)
+        @result
+        (let [entry-time (unix->datetime data i)
+              entry-type (ubyte (aget data (+ i 4)))
+              country (ubyte (aget data (+ i 5)))
+              region (ubyte (aget data (+ i 6)))
+              odometer (u24-be data (+ i 7))]
+          (when entry-time
+            (swap! result conj {:entry-time entry-time
+                                :entry-type entry-type
+                                :country country
+                                :region region
+                                :odometer-km odometer}))
+          (recur (+ i 10)))))))
 
 ;; TODO hardcoded tags from the EU spec
 (def identification-tag 0x052000)
@@ -190,6 +211,7 @@
 (def events-tag         0x050200)
 (def faults-tag         0x050300)
 (def vehicles-tag       0x050500)
+(def places-tag         0x050600)
 
 (defn find-tlv [tlvs tag]
   (:value (first (filter (fn [t] (= (:tag t) tag)) tlvs))))
@@ -207,12 +229,14 @@
         lic-val (find-tlv tlvs licence-tag)
         ev-val (find-tlv tlvs events-tag)
         fl-val (find-tlv tlvs faults-tag)
-        veh-val (find-tlv tlvs vehicles-tag)]
+        veh-val (find-tlv tlvs vehicles-tag)
+        plc-val (find-tlv tlvs places-tag)]
     {:identification (when id-val (parse-identification id-val))
      :driving-licence (when lic-val (parse-licence lic-val))
      :events (if ev-val (parse-event-records ev-val) [])
      :faults (if fl-val (parse-event-records fl-val) [])
-     :vehicles-used (if veh-val (parse-vehicles veh-val) [])}))
+     :vehicles-used (if veh-val (parse-vehicles veh-val) [])
+     :places (if plc-val (parse-places plc-val) [])}))
 
 (defn -main [& args]
   ;; please use your own .DDD file you downloaded from your own tacho card
