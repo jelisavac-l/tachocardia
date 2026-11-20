@@ -164,6 +164,27 @@
                                 :vehicle-registration (:registration veh)}))
           (recur (+ i 24)))))))
 
+(defn parse-activity-change
+  "2 bytes bitfield:
+   bit 15: slot (0=driver, 1=co-driver)
+   bit 14: crew (0=single, 1=crew)
+   bit 13: card (0=inserted, 1=not-inserted)
+   bits 12..11: activity (0=break/rest, 1=availability, 2=work, 3=driving)
+   bits 10..0: minutes since 00:00"
+  [word]
+  (let [slot (bit-and (bit-shift-right word 15) 1)
+        crew (bit-and (bit-shift-right word 14) 1)
+        inserted (bit-and (bit-shift-right word 13) 1)
+        act (bit-and (bit-shift-right word 11) 3)
+        mins (bit-and word 0x7ff)
+        hh (quot mins 60)
+        mm (rem mins 60)]
+    {:time (format "%02d:%02d" hh mm)
+     :activity (nth ["break/rest" "availability" "work" "driving"] act)
+     :slot (if (= slot 0) "driver" "co-driver")
+     :driving-status (if (= crew 0) "single" "crew")
+     :card-status (if (= inserted 0) "inserted" "not-inserted")}))
+
 (defn parse-vehicles [data]
   ;; 2 bytes newest pointer, then 31-byte records
   (let [n (alength data)
