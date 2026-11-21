@@ -185,6 +185,39 @@
      :driving-status (if (= crew 0) "single" "crew")
      :card-status (if (= inserted 0) "inserted" "not-inserted")}))
 
+(defn parse-activities [data]
+  ;; first 4 bytes are pointers into the cyclic buffer that starts at offset 4
+  (let [oldest (u16-be data 0)
+        newest (u16-be data 2)
+        buf-len (- (alength data) 4)
+        buf (byte-array buf-len)
+        days (atom [])]
+    (dotimes [k buf-len]
+      (aset buf k (aget data (+ k 4))))
+    (loop [offset oldest]
+      (let [;; copy header safely in case it wraps around the cyclic buffer
+            rec-len (+ (* (ubyte (aget buf (mod (+ offset 2) buf-len))) 256)
+                       (ubyte (aget buf (mod (+ offset 3) buf-len))))]
+        (if (or (< rec-len 12) (> rec-len buf-len))
+          @days
+          (let [rec (byte-array rec-len)
+                _ (dotimes [k rec-len]
+                    (aset rec k (aget buf (mod (+ offset k) buf-len))))
+                date (unix->date rec 4)
+                distance (u16-be rec 10)
+                n-changes (quot (- rec-len 12) 2)
+                changes (atom [])]
+            (dotimes [k n-changes]
+              (let [w (u16-be rec (+ 12 (* k 2)))]
+                (swap! changes conj (parse-activity-change w))))
+            (when date
+              (swap! days conj {:date date
+                                :distance-km distance
+                                :events @changes}))
+            (if (= offset newest)
+              @days
+              (recur (mod (+ offset rec-len) buf-len)))))))))
+
 (defn parse-vehicles [data]
   ;; 2 bytes newest pointer, then 31-byte records
   (let [n (alength data)
@@ -231,6 +264,7 @@
 (def licence-tag        0x052100)
 (def events-tag         0x050200)
 (def faults-tag         0x050300)
+(def activity-tag       0x050400)
 (def vehicles-tag       0x050500)
 (def places-tag         0x050600)
 
@@ -250,12 +284,14 @@
         lic-val (find-tlv tlvs licence-tag)
         ev-val (find-tlv tlvs events-tag)
         fl-val (find-tlv tlvs faults-tag)
+        act-val (find-tlv tlvs activity-tag)
         veh-val (find-tlv tlvs vehicles-tag)
         plc-val (find-tlv tlvs places-tag)]
     {:identification (when id-val (parse-identification id-val))
      :driving-licence (when lic-val (parse-licence lic-val))
      :events (if ev-val (parse-event-records ev-val) [])
      :faults (if fl-val (parse-event-records fl-val) [])
+     :daily-activities (if act-val (parse-activities act-val) [])
      :vehicles-used (if veh-val (parse-vehicles veh-val) [])
      :places (if plc-val (parse-places plc-val) [])}))
 
