@@ -295,12 +295,51 @@
      :vehicles-used (if veh-val (parse-vehicles veh-val) [])
      :places (if plc-val (parse-places plc-val) [])}))
 
+;; simple recursive json writer so we don't need external libraries
+(defn json-escape [s]
+  (-> s
+      (str/replace "\\" "\\\\")
+      (str/replace "\"" "\\\"")
+      (str/replace "\n" "\\n")
+      (str/replace "\r" "\\r")
+      (str/replace "\t" "\\t")))
+
+(defn to-json
+  ([x] (to-json x 0))
+  ([x indent]
+   (let [pad (apply str (repeat indent "  "))
+         next-pad (apply str (repeat (+ indent 1) "  "))]
+     (cond
+       (nil? x) "null"
+       (string? x) (str "\"" (json-escape x) "\"")
+       (keyword? x) (str "\"" (name x) "\"")
+       (or (number? x) (boolean? x)) (str x)
+       (map? x)
+       (if (empty? x)
+         "{}"
+         (str "{\n"
+              (str/join ",\n"
+                        (map (fn [[k v]]
+                               (str next-pad (to-json k) ": " (to-json v (+ indent 1))))
+                             x))
+              "\n" pad "}"))
+       (sequential? x)
+       (if (empty? x)
+         "[]"
+         (str "[\n"
+              (str/join ",\n"
+                        (map (fn [item]
+                               (str next-pad (to-json item (+ indent 1))))
+                             x))
+              "\n" pad "]"))
+       :else (str "\"" (json-escape (str x)) "\"")))))
+
 (defn -main [& args]
   ;; please use your own .DDD file you downloaded from your own tacho card
   (let [path (if (first args) (first args) "example.DDD")
         card (read-card path)]
     (if (:identification card)
-      (println card)
+      (println (to-json card))
       (do
         (println "could not find identification")
         (System/exit 1)))))
